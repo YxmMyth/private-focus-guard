@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir:*)",
+      "Bash(node:*)",
+      "Bash(if not exist \"node_modules\" npm install)",
+      "Bash(npm install:*)",
+      "Bash(npm cache clean:*)",
+      "Bash(test:*)",
+      "Bash(cat:*)",
+      "Bash(npm config set:*)",
+      "Bash(npm config get:*)",
+      "Bash(set:*)",
+      "Bash(npm run type-check:*)",
+      "Bash(npm rebuild:*)",
+      "Bash(npm uninstall:*)",
+      "Bash(npm run build)",
+      "Bash(tasklist:*)",
+      "Bash(npx electron .)",
+      "Bash(npm run electron:dev:*)",
+      "Bash(tree:*)",
+      "Bash(npm:*)",
+      "Bash(timeout:*)",
+      "Bash(ping:*)",
+      "Bash(findstr:*)",
+      "Bash(del:*)",
+      "Bash(taskkill:*)",
+      "Bash(git init:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git remote add:*)",
+      "Bash(git branch:*)",
+      "Bash(git push:*)",
+      "Bash(git reset:*)"
+    ]
+  }
+}

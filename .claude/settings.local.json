@@ -31,7 +31,20 @@
       "Bash(git remote add:*)",
       "Bash(git branch:*)",
       "Bash(git push:*)",
-      "Bash(git reset:*)"
+      "Bash(git reset:*)",
+      "Bash(npx electron-rebuild:*)",
+      "Bash(curl:*)",
+      "Bash(netstat:*)",
+      "Bash(cmd.exe:*)",
+      "Bash(powershell:*)",
+      "Bash(npx tsc:*)",
+      "Bash(tee:*)",
+      "Bash(npx @electron/rebuild:*)",
+      "WebSearch",
+      "Bash(mkdir:*)",
+      "Bash(python:*)",
+      "Bash(pip:*)",
+      "Bash(cd:*)"
     ]
   }
 }

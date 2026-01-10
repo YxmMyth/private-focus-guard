@@ -1,6 +1,6 @@
-# FocusGuard - AI专注力监督工具 (Python版本)
+# FocusGuard - AI专注力监督工具
 
-## ✅ 监控功能 + 图形界面 + 浏览器URL追踪！
+## ✅ 监控功能 + 图形界面 + 浏览器URL追踪
 
 ### 🆕 最新功能：浏览器URL监控
 

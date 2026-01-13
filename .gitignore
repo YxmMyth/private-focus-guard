@@ -1,0 +1,52 @@
+# Python 相关
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# 敏感信息（最重要！）
+focusguard/.env
+bundled_config.env
+*.env
+
+# 构建产物
+build/
+dist/
+*.spec
+*.exe
+
+# 开发工具
+.claude/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 临时文件
+*.tmp
+*.log
+.DS_Store
+Thumbs.db
+nul
+
+# 测试相关
+.pytest_cache/
+.coverage
+htmlcov/

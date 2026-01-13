@@ -1,0 +1,39 @@
+# FocusGuard v3.0 - Dependencies
+
+# GUI Framework
+PyQt6==6.6.1
+
+# Windows System APIs
+pywin32==306
+psutil==5.9.8
+
+# Window Control (for CLOSE_TAB feature)
+pyautogui==0.9.54
+pymsgbox>=2.0.1
+pyscreeze>=1.0.1
+pygetwindow>=0.0.9
+pyrect>=0.2.0
+pyperclip>=1.11.0
+pytweening>=1.2.0
+
+# HTTP Client for LLM API
+requests==2.31.0
+aiohttp==3.9.1
+async-timeout==4.0.3
+
+# Environment Configuration
+python-dotenv==1.0.1
+
+# LLM SDK (Tencent Hunyuan)
+tencentcloud-sdk-python==3.0.1000
+
+# Packaging (for Nuitka build)
+# nuitka>=2.0
+# ordered-set>=4.1.0
+# zstandard>=0.22.0
+
+# Logging (optional enhancement)
+# loguru==0.7.2
+
+# Async/Qt Bridge (optional, for tighter asyncio integration)
+# qasync==0.27.1

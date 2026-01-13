@@ -6,7 +6,6 @@ __pycache__/
 .Python
 build/
 develop-eggs/
-dist/
 downloads/
 eggs/
 .eggs/
@@ -24,12 +23,30 @@ wheels/
 focusguard/.env
 bundled_config.env
 *.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# 敏感文档（可能包含API密钥）
+*RECOVERY_CHECKLIST.md
+*WEEK2_PROGRESS.md
+*PROGRESS.md
+*_CHECKLIST.md
+*_PROGRESS.md
 
 # 构建产物
 build/
 dist/
+release/
+out/
 *.spec
 *.exe
+
+# 数据库
+*.db
+*.sqlite
+*.sqlite3
 
 # 开发工具
 .claude/
@@ -39,9 +56,14 @@ dist/
 *.swo
 *~
 
-# 临时文件
+# 临时文件和日志
 *.tmp
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
 .DS_Store
 Thumbs.db
 nul
@@ -50,3 +72,4 @@ nul
 .pytest_cache/
 .coverage
 htmlcov/
+coverage/

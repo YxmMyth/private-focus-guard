@@ -48,6 +48,9 @@ class ActionManager(QObject):
         self._temp_whitelist: set[str] = set()  # 临时白名单（应用名称）
         self._strict_mode_until: Optional[float] = None  # 严格模式结束时间（timestamp）
 
+        # 新增：刚关闭的关键词列表，防止误报
+        self._recently_closed_keywords: dict[str, float] = {}  # {keyword: timestamp}
+
         logger.info("ActionManager initialized")
 
     def handle_action(
@@ -473,5 +476,65 @@ class ActionManager(QObject):
 
         if success:
             logger.info(f"Action: CLOSE_TAB - Closed tab with keyword '{keyword}'")
+
+            # 关键修复：添加到忽略列表，防止5分钟内重复检测
+            import time
+            self._recently_closed_keywords[keyword.lower()] = time.time()
+            logger.info(f"Added '{keyword}' to ignore list for 5 minutes to prevent false positives")
+
+            # 新增：从数据库中删除最近的活动记录，防止LLM误判
+            try:
+                from ..storage.database import ensure_initialized
+                import sqlite3
+                from focusguard.config import config
+
+                with ensure_initialized(config.db_path) as conn:
+                    # 删除最近5分钟内包含该关键词的活动记录
+                    conn.execute(
+                        """
+                        DELETE FROM activity_logs
+                        WHERE timestamp >= strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime', '-5 minutes')
+                        AND (
+                            lower(window_title) LIKE lower(?)
+                            OR lower(url) LIKE lower(?)
+                        )
+                        """,
+                        (f"%{keyword}%", f"%{keyword}%")
+                    )
+                    conn.commit()
+                    logger.info(f"Deleted recent activity logs containing '{keyword}' from database (last 5 minutes)")
+            except Exception as e:
+                logger.warning(f"Failed to delete activity logs: {e}")
         else:
             logger.error(f"Action: CLOSE_TAB - Failed to close tab with keyword '{keyword}'")
+
+    def is_keyword_recently_closed(self, keyword: str) -> bool:
+        """
+        检查某个关键词是否在最近被关闭过（在5分钟冷却期内）。
+
+        Args:
+            keyword: 要检查的关键词
+
+        Returns:
+            bool: 如果在冷却期内返回True，否则返回False
+        """
+        import time
+
+        # 清理过期的忽略项
+        current_time = time.time()
+        expired_keywords = [
+            kw for kw, timestamp in self._recently_closed_keywords.items()
+            if current_time - timestamp > 300  # 5分钟冷却期 (300秒)
+        ]
+        for kw in expired_keywords:
+            del self._recently_closed_keywords[kw]
+
+        # 检查当前关键词是否在忽略列表中
+        keyword_lower = keyword.lower()
+        # 检查是否包含任意忽略的关键词
+        for ignored_keyword in self._recently_closed_keywords:
+            if ignored_keyword in keyword_lower or keyword_lower in ignored_keyword:
+                logger.info(f"Keyword '{keyword}' is in ignore list (matches '{ignored_keyword}'), skipping detection")
+                return True
+
+        return False

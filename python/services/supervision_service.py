@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from collections import deque
 
-from services.llm_service import create_hunyuan_adapter, ChatMessage
+from services.zhipuai_adapter import create_zhipuai_adapter, ChatMessage
 from storage.session_repository import session_repository
 
 
@@ -41,12 +41,11 @@ class SupervisionService:
             try:
                 # 从环境变量读取密钥
                 import os
-                secret_id = os.getenv('TENCENT_SECRET_ID')
-                secret_key = os.getenv('TENCENT_SECRET_KEY')
+                api_key = os.getenv('ZHIPUAI_API_KEY')
 
-                if secret_id and secret_key:
-                    self.llm_adapter = create_hunyuan_adapter(secret_id, secret_key)
-                    print("[SupervisionService] LLM 适配器初始化成功")
+                if api_key:
+                    self.llm_adapter = create_zhipuai_adapter(api_key)
+                    print("[SupervisionService] 智谱AI LLM 适配器初始化成功")
                 else:
                     print("[SupervisionService] 未配置 LLM 密钥，仅使用规则判决")
             except Exception as e:

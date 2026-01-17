@@ -138,9 +138,9 @@ class SupervisionEngine(QThread):
             try:
                 # 步骤 1: 读取活动摘要
                 with ensure_initialized(self._db_path) as conn:
-                    instant_log = get_activity_summary(conn, seconds=30)
-                    short_trend = get_activity_summary(conn, seconds=300)
-                    context_trend = get_activity_summary(conn, seconds=1200)
+                    instant_log = get_activity_summary(conn, seconds=10)    # 只看最近10秒
+                    short_trend = get_activity_summary(conn, seconds=60)    # 短期趋势1分钟
+                    context_trend = get_activity_summary(conn, seconds=300)  # 长期趋势5分钟
 
                     # 获取信任分和当前目标
                     trust_score = get_trust_score(conn)
@@ -163,6 +163,17 @@ class SupervisionEngine(QThread):
                     latest_app = instant_log[0].get("app_name", "")
                     if self._action_manager.is_whitelisted(latest_app):
                         logger.debug(f"App {latest_app} is whitelisted, skipping")
+                        self._wait_next_check()
+                        continue
+
+                    # 检查是否刚被关闭（防止误报）
+                    latest_window = instant_log[0].get("window_title", "")
+                    latest_url = instant_log[0].get("url", "")
+
+                    # 检查窗口标题或URL是否在忽略列表中
+                    if self._action_manager.is_keyword_recently_closed(latest_window) or \
+                       self._action_manager.is_keyword_recently_closed(latest_url):
+                        logger.debug(f"Recently closed tab detected, skipping LLM call to prevent false positive")
                         self._wait_next_check()
                         continue
 
@@ -379,6 +390,7 @@ class FocusGuardApp(QApplication):
         self._main_window = MainWindow()
         self._main_window.monitoring_toggled.connect(self._on_monitoring_toggled)
         self._main_window.goal_updated.connect(self._on_goal_updated)
+        self._main_window.window_closed.connect(self._on_window_closed)  # 关键修复：连接窗口关闭信号
 
         self._windows_monitor = WindowsMonitor(
             poll_interval=config.windows_monitor_interval
@@ -516,12 +528,12 @@ class FocusGuardApp(QApplication):
         """
         logger.info(f"User explained: {reason}")
 
-        # 临时降低监控频率（1 分钟内不检测）
+        # 临时降低监控频率（5 分钟内不检测，给用户充足的工作时间）
         original_interval = self._engine._check_interval
-        self._engine._check_interval = 60
+        self._engine._check_interval = 300  # 5分钟 = 300秒
 
-        # 1 分钟后恢复原始检测间隔
-        QTimer.singleShot(60000, lambda: setattr(self._engine, '_check_interval', original_interval))
+        # 5 分钟后恢复原始检测间隔
+        QTimer.singleShot(300000, lambda: setattr(self._engine, '_check_interval', original_interval))
 
         # 记录到数据库作为学习数据
         try:
@@ -537,7 +549,7 @@ class FocusGuardApp(QApplication):
         except Exception as e:
             logger.warning(f"Failed to log user reason: {e}")
 
-        logger.info(f"Supervision relaxed for 1 minute due to user explanation")
+        logger.info(f"Supervision relaxed for 5 minutes due to user explanation")
 
     def _on_balance_updated(self, new_balance: int, transaction_info: dict) -> None:
         """
@@ -866,6 +878,27 @@ class FocusGuardApp(QApplication):
         self._cleaner.stop()
 
         logger.info("All monitors stopped")
+
+    def _on_window_closed(self) -> None:
+        """
+        处理主窗口关闭事件。
+
+        确保关闭主窗口后，所有监控和弹窗都停止。
+        """
+        logger.info("MainWindow closed, stopping all monitoring and quitting application...")
+
+        # 停止所有监控
+        self._stop_monitoring()
+
+        # 关闭所有干预对话框
+        if hasattr(self, '_dialog') and self._dialog:
+            self._dialog.close()
+
+        # 退出应用程序
+        self.quit()
+
+        logger.info("Application shutdown complete")
+
 
 
 def main() -> int:

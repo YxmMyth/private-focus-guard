@@ -31,7 +31,8 @@ class BrowserMonitor:
 
     def __init__(self):
         self.last_timestamp = 0
-        self.cached_urls = set()
+        self.cached_urls = {}  # 改为字典：{url: timestamp}
+        self.cache_ttl = timedelta(minutes=2)  # URL缓存2分钟过期
 
     def get_chrome_history_path(self) -> Optional[str]:
         """获取Chrome History文件路径"""
@@ -91,9 +92,9 @@ class BrowserMonitor:
             conn = sqlite3.connect(temp_path)
             cursor = conn.cursor()
 
-            # 查询最近5分钟的访问记录
+            # 查询最近1分钟的访问记录（缩短时间窗口以减少误判）
             # Chrome时间戳是微秒，从1601-01-01开始
-            five_minutes_ago = int((datetime.now() - timedelta(minutes=5)).timestamp() * 1000000) + 11644473600000000
+            one_minute_ago = int((datetime.now() - timedelta(minutes=1)).timestamp() * 1000000) + 11644473600000000
 
             query = """
                 SELECT url, title, last_visit_time
@@ -103,7 +104,7 @@ class BrowserMonitor:
                 LIMIT 50
             """
 
-            cursor.execute(query, (five_minutes_ago,))
+            cursor.execute(query, (one_minute_ago,))
             rows = cursor.fetchall()
 
             conn.close()
@@ -183,14 +184,21 @@ class BrowserMonitor:
             return []
 
         records = self.read_history_file(history_path)
+        now = datetime.now()
 
         activities = []
         for record in records[:limit]:
-            # 去重
-            if record['url'] in self.cached_urls:
-                continue
+            url = record['url']
 
-            self.cached_urls.add(record['url'])
+            # 检查缓存是否过期
+            if url in self.cached_urls:
+                cached_time = self.cached_urls[url]
+                # 如果在缓存期内（2分钟内），跳过
+                if now - cached_time < self.cache_ttl:
+                    continue
+
+            # 添加/更新缓存时间戳
+            self.cached_urls[url] = now
 
             activities.append(BrowserActivity(
                 url=record['url'],
@@ -208,14 +216,21 @@ class BrowserMonitor:
             return []
 
         records = self.read_history_file(history_path)
+        now = datetime.now()
 
         activities = []
         for record in records[:limit]:
-            # 去重
-            if record['url'] in self.cached_urls:
-                continue
+            url = record['url']
 
-            self.cached_urls.add(record['url'])
+            # 检查缓存是否过期
+            if url in self.cached_urls:
+                cached_time = self.cached_urls[url]
+                # 如果在缓存期内（2分钟内），跳过
+                if now - cached_time < self.cache_ttl:
+                    continue
+
+            # 添加/更新缓存时间戳
+            self.cached_urls[url] = now
 
             activities.append(BrowserActivity(
                 url=record['url'],
@@ -243,9 +258,25 @@ class BrowserMonitor:
 
         return activities[:limit]
 
+    def cleanup_expired_cache(self):
+        """清理过期的URL缓存"""
+        now = datetime.now()
+        expired_urls = []
+
+        for url, cached_time in self.cached_urls.items():
+            if now - cached_time >= self.cache_ttl:
+                expired_urls.append(url)
+
+        for url in expired_urls:
+            del self.cached_urls[url]
+
+        if expired_urls:
+            print(f"[BrowserMonitor] 已清理 {len(expired_urls)} 个过期URL缓存")
+
     def clear_cache(self):
         """清空URL缓存"""
         self.cached_urls.clear()
+        print("[BrowserMonitor] 已清空所有URL缓存")
 
 
 # 单例

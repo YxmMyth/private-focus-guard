@@ -63,6 +63,7 @@ class MonitoringThread(QThread):
         self.running = False
         self.stopper = False
         self.last_intervention_time = None  # Phase 3: 上次干预时间（避免频繁触发）
+        self.loop_count = 0  # 用于定期清理缓存
 
     def run(self):
         """运行监控"""
@@ -91,7 +92,7 @@ class MonitoringThread(QThread):
                     app_name_lower = activity.app_name.lower()
                     if 'chrome' in app_name_lower or 'msedge' in app_name_lower or 'edge' in app_name_lower:
                         try:
-                            browser_history = browser_monitor.get_all_browser_history(limit=3)
+                            browser_history = browser_monitor.get_all_browser_history(limit=1)
                             if browser_history:
                                 latest = browser_history[0]
                                 activity_data['url'] = latest.url
@@ -208,6 +209,12 @@ class MonitoringThread(QThread):
                     last_activity = activity_data
             except Exception as e:
                 print(f"监控错误: {e}")
+
+            # 定期清理浏览器URL缓存（每20次循环，即约60秒）
+            self.loop_count += 1
+            if self.loop_count >= 20:
+                browser_monitor.cleanup_expired_cache()
+                self.loop_count = 0
 
             # 等待指定间隔
             for _ in range(self.interval * 10):

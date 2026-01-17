@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 
-from services.llm_service import create_hunyuan_adapter, ChatMessage
+from services.zhipuai_adapter import create_zhipuai_adapter, ChatMessage
 from storage.session_repository import session_repository
 from storage.database import db_manager
 
@@ -53,12 +53,11 @@ class ConversationService:
         if self.llm_adapter is None:
             try:
                 import os
-                secret_id = os.getenv('TENCENT_SECRET_ID')
-                secret_key = os.getenv('TENCENT_SECRET_KEY')
+                api_key = os.getenv('ZHIPUAI_API_KEY')
 
-                if secret_id and secret_key:
-                    self.llm_adapter = create_hunyuan_adapter(secret_id, secret_key)
-                    print("[ConversationService] LLM 适配器初始化成功")
+                if api_key:
+                    self.llm_adapter = create_zhipuai_adapter(api_key)
+                    print("[ConversationService] 智谱AI LLM 适配器初始化成功")
                 else:
                     print("[ConversationService] 未配置 LLM 密钥")
             except Exception as e:

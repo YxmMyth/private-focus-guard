@@ -14,6 +14,7 @@ from typing import Optional, Callable
 
 from services.conversation_service import conversation_service, InterventionResult
 from services.tolerance_service import tolerance_service
+from monitors.chrome_monitor import browser_monitor
 
 
 class InterventionDialog(QDialog):
@@ -263,6 +264,8 @@ class InterventionDialog(QDialog):
 
     def on_close_app(self):
         """关闭应用"""
+        # 清理浏览器URL缓存，避免误判
+        browser_monitor.clear_cache()
         self.input_box.setPlainText("好的，我马上关闭这个应用，回到专注状态。")
         self.on_send_message()
 

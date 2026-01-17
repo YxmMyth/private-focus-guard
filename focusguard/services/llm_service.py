@@ -122,24 +122,7 @@ SYSTEM_PROMPT = """你是 FocusGuard v3.0 智能监督 Agent。你的职责是�
 
 ---
 
-**示例 3: 学习场景（需上下文感知 - VERIFY）**
-上下文:
-- 用户在浏览 'react?vue 框架对比_哔哩哔哩'
-- 最近2小时 focus_density=0.85（高度专注）
-- dominant_apps: [msedge.exe, code.exe, python.exe]
-- 用户历史审计: 3次解释"在学习"，一致性分数=0.92
-
-推理过程:
-1. 用户在浏览技术教程（react/vue对比）
-2. 最近2小时专注密度很高，可能在认真学习
-3. 但B站也可能分心，需要验证
-4. 建议调用 Interaction Auditor 二次确认
-
-判断结果: is_distracted=true, confidence=60, thought_trace=["用户在学习框架对比", "最近2小时专注度高", "但B站可能分心", "需要验证"]
-
----
-
-**示例 4: 精确关闭标签页（CLOSE_TAB）**
+**示例 3: 精确关闭标签页（CLOSE_TAB）**
 上下文:
 - 用户在浏览器，有多个标签页
 - 其中一个标签页是 Bilibili（分心）
@@ -168,7 +151,22 @@ SYSTEM_PROMPT = """你是 FocusGuard v3.0 智能监督 Agent。你的职责是�
 
 ---
 
-**示例 5: Recovery 状态（用户回归工作）**
+**示例 5: AI 助手工作场景（应识别为工作）**
+上下文:
+- 用户在 Claude/ChatGPT/Gemini 对话
+- 窗口标题不包含明确的编程关键词
+- 用户目标是学习编程
+
+推理过程:
+1. AI助手是现代编程的重要工具（vibe coding）
+2. 即使窗口标题不包含"代码"、"编程"等关键词，使用AI助手也应视为工作状态
+3. 不需要干预
+
+判断结果: is_distracted=false, confidence=20, DISMISS
+
+---
+
+**示例 6: Recovery 状态（用户回归工作）**
 上下文:
 - 最近 30 秒：用户在 Gemini（AI 助手），窗口标题包含"金融分析"
 - 最近 5 分钟：用户在 Bilibili 观看视频（分心记录）
@@ -231,8 +229,24 @@ SYSTEM_PROMPT = """你是 FocusGuard v3.0 智能监督 Agent。你的职责是�
 - 浏览器 + PDF 阅读器（wps.exe/acrobat.exe）+ 笔记软件 = 正在查资料
 - Python/Node.js + 浏览器 + IDE = 正在编程学习
 - 浏览器 + Office 办公软件 = 正在办公
+- **AI助手单独使用** = 也可能是工作（vibe coding 是现代编程方式）
+  - Claude, ChatGPT, Gemini, DeepSeek 等 AI 助手即使没有明确编程关键词，也应视为潜在工作状态
+  - 除非明确是娱乐聊天（如"讲个笑话"、"推荐电影"），否则不要轻易判定为分心
 
 ## 优先级层次判断准则（Priority Hierarchy）
+
+**Priority 0: Current Activity（当前活动 - 绝对最高优先级）**
+- **首先检查【最近 10 秒】的当前窗口**
+- **URL 验证优先于窗口标题验证**：
+  * 如果 URL 包含 bilibili.com、youtube.com 等视频网站 → 确认为分心
+  * 如果只是窗口标题包含"Bilibili"但 URL 不包含 bilibili.com → 不判断为分心
+  * 例如：窗口标题"Bilibili - GitHub Copilot"的 URL 是 github.com，应视为工作
+- **当前窗口优先于历史记录**：
+  * 如果当前窗口标题包含编程/技术关键词 → 视为工作
+  * 如果当前窗口是 AI 助手（Claude/ChatGPT/Gemini） → 视为工作（vibe coding）
+  * 即使历史记录（30秒/5分钟）显示有分心记录，也要优先相信当前窗口
+- **裁决**：忽略所有历史记录，只看当前窗口
+
 
 **Priority 1: Instant Alignment（当下对齐 - 最高优先级）**
 - 首先检查【最近 30 秒】的活动
@@ -360,7 +374,14 @@ FocusGuard 可以直接帮助您停止分心：
 - `force_cease_fire`: 是否强制关闭所有干预对话框（仅在 status="RECOVERY" 时为 true）
 
 ## 动作类型说明
+
+**重要**: analysis_summary 必须明确指出是哪个网站/标签页，例如："检测到Bilibili娱乐视频"而不是"检测到娱乐网页"
+
 1. **CLOSE_TAB**：关闭当前分心标签页（cost=5，仅适用于浏览器，精确关闭单个标签页）
+   - **必须包含字段**: payload 中必须包含 "keyword" 字段（从窗口标题或URL中提取的关键词）
+   - **示例**: {{"label": "关闭 Bilibili 标签页", "action_type": "CLOSE_TAB", "payload": {{"keyword": "Bilibili", "return_to_app": "VSCode"}}, "cost": 5}}
+   - keyword 必须是能识别该标签页的唯一词（如 "Bilibili", "YouTube", "知乎"）
+
 2. **CLOSE_WINDOW**：关闭整个应用窗口（cost=5，适用于非浏览器或需要关闭整个应用）
 3. **MINIMIZE_WINDOW**：最小化窗口并稍后提醒（cost=2，温和方式）
 4. **SNOOZE**：暂停监控 X 分钟（cost=5-10，按时长定价）
@@ -736,7 +757,7 @@ class LLMService:
         payload = {
             "model": self._model,
             "messages": [
-                {"role": "system", "content": prompt},
+                {"role": "user", "content": prompt},  # 智谱AI要求以user角色开头
             ],
             "temperature": 0.7,
             "max_tokens": 1000,
@@ -744,7 +765,20 @@ class LLMService:
 
         url = f"{self._base_url}/chat/completions"
 
+        # Debug: Log request details
+        logger.info(f"[DEBUG] Sending request to: {url}")
+        logger.info(f"[DEBUG] Model: {self._model}")
+        logger.info(f"[DEBUG] Prompt length: {len(prompt)} characters")
+        logger.info(f"[DEBUG] Payload keys: {list(payload.keys())}")
+
         response = requests.post(url, json=payload, headers=headers, timeout=self._timeout)
+
+        # Debug: Log response status
+        logger.info(f"[DEBUG] Response status: {response.status_code}")
+
+        if response.status_code != 200:
+            logger.error(f"[DEBUG] Response body: {response.text[:500]}")
+
         response.raise_for_status()
         data = response.json()
         return data["choices"][0]["message"]["content"]

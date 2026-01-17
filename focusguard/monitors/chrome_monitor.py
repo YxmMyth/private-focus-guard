@@ -223,24 +223,37 @@ class ChromeMonitor(BaseMonitor):
             return
 
         try:
-            # 读取最近的 URL（只读取最近 30 秒内访问的）
+            # 读取最近的 URL（只读取最近 3 秒内访问的，避免误判历史记录）
             history = read_chrome_history(
                 self._history_path,
                 limit=1,
-                time_threshold_seconds=30  # 添加时间阈值
+                time_threshold_seconds=3  # 缩短到3秒，只检测当前正在浏览的页面
             )
             if not history:
-                logger.debug("No recent Chrome history found (within 30 seconds)")
+                logger.debug("No recent Chrome history found (within 3 seconds)")
                 return
 
             current_url = history["url"]
 
-            # 检查 URL 是否有变化
-            if current_url != self._last_url:
-                self.activity_detected.emit(app_name, window_title, current_url)
-                self._last_url = current_url
-
-                logger.debug(f"Chrome history detected: {current_url[:80]}...")
+            # 新增：URL 验证优先于窗口标题验证
+            # 只有真正访问 bilibili.com 才触发检测
+            if "bilibili.com" in current_url.lower():
+                # 真正的 Bilibili 访问 - 触发检测
+                if current_url != self._last_url:
+                    self.activity_detected.emit(app_name, window_title, current_url)
+                    self._last_url = current_url
+                    logger.debug(f"Chrome history detected: {current_url[:80]}...")
+            elif "bilibili" in title_lower:
+                # 窗口标题包含 "Bilibili" 但 URL 不包含 bilibili.com
+                # 例如：GitHub Copilot 相关的页面标题含有 "Bilibili"
+                logger.debug(f"Window title contains 'Bilibili' but URL is {current_url[:80]}, ignoring")
+                # 不触发检测
+            else:
+                # 正常检测其他 URL
+                if current_url != self._last_url:
+                    self.activity_detected.emit(app_name, window_title, current_url)
+                    self._last_url = current_url
+                    logger.debug(f"Chrome history detected: {current_url[:80]}...")
 
         except Exception as e:
             logger.warning(f"ChromeMonitor error: {e}", exc_info=True)

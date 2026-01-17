@@ -40,6 +40,7 @@ class MainWindow(QMainWindow):
     # Signal 定义
     monitoring_toggled = pyqtSignal(bool)  # (is_monitoring: bool)
     goal_updated = pyqtSignal(str)  # (new_goal: str)
+    window_closed = pyqtSignal()  # 窗口关闭信号
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         """
@@ -461,3 +462,14 @@ class MainWindow(QMainWindow):
         if dialog.exec() == QDialog.DialogCode.Accepted:
             # 配置已保存
             logger.info("Settings saved by user")
+
+    def closeEvent(self, event) -> None:
+        """
+        窗口关闭事件处理。
+
+        发送 window_closed 信号，通知应用程序停止所有监控。
+        """
+        logger.info("MainWindow closeEvent triggered")
+        self.window_closed.emit()
+        event.accept()
+

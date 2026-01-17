@@ -264,37 +264,54 @@ def get_activity_summary(
     """
     获取最近 N 秒内的活动摘要（用于 LLM 上下文）。
 
-    改进：先按应用聚合，统计每个应用的窗口数量，避免同一应用的多标签页被误判为频繁切换。
+    改进：
+    1. 按 app_name 和 url 分组（如果 URL 存在）
+    2. 增加窗口标题显示长度（40 → 60 字符）
+    3. 按最新活动时间排序（当前活跃窗口优先）
 
     Args:
         conn: 数据库连接
         seconds: 时间范围（秒）
 
     Returns:
-        list[dict]: 活动摘要列表，每个元素包含应用名、窗口数量、窗口标题列表
+        list[dict]: 活动摘要列表，每个元素包含应用名、URL（如果有）、窗口数量、窗口标题列表
     """
-    # 先按应用聚合，统计每个应用的窗口数量和窗口标题列表
+    # 按 app_name 和 url 分组，统计窗口数量和窗口标题列表
+    # 如果 url 为 NULL，则只按 app_name 分组
     cursor = conn.execute(
         """
         SELECT
             app_name,
+            url,
             COUNT(DISTINCT window_title) as window_count,
-            GROUP_CONCAT(SUBSTR(window_title, 1, 40), ' | ') as windows
+            GROUP_CONCAT(SUBSTR(window_title, 1, 60), ' | ') as windows
         FROM activity_logs
         WHERE timestamp >= strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime', '-{} seconds')
-        GROUP BY app_name
-        ORDER BY window_count DESC
+        GROUP BY app_name, url
+        ORDER BY MAX(timestamp) DESC
         LIMIT 10
         """.format(seconds)
     )
 
     summary = []
     for row in cursor.fetchall():
+        app_name = row[0]
+        url = row[1]
+        window_count = row[2]
+        windows = row[3]
+
+        # 格式化显示（包含 URL 信息）
+        if url:
+            format_str = f"{app_name} ({url[:50]}... - {window_count} 个窗口)"
+        else:
+            format_str = f"{app_name} ({window_count} 个窗口)"
+
         summary.append({
-            "app_name": row[0],
-            "window_count": row[1],
-            "windows": row[2],
-            "format": f"{row[0]} ({row[1]} 个窗口)"  # 用于格式化显示
+            "app_name": app_name,
+            "url": url,  # 新增 URL 字段
+            "window_count": window_count,
+            "windows": windows,
+            "format": format_str
         })
 
     return summary
@@ -945,3 +962,4 @@ def get_all_latest_insights(
             insights[insight_type] = insight
 
     return insights
+

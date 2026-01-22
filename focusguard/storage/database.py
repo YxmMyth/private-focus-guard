@@ -219,6 +219,36 @@ def initialize_schema(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_insights_type ON user_insights(insight_type)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_insights_time ON user_insights(created_at)")
 
+    # ============ Memory 系统：Episodic Memory（情景记忆）============
+    # Table: episodic_events - 记录用户行为事件（用于 Recovery 检测）
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS episodic_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_type TEXT NOT NULL CHECK(event_type IN (
+                'DISTRACTION_DETECTED',
+                'USER_CLOSED_TAB',
+                'USER_CLOSED_WINDOW',
+                'USER_MINIMIZED',
+                'USER_SNOOZED',
+                'USER_DISMISSED',
+                'USER_WHITELISTED',
+                'USER_STRICT_MODE',
+                'RECOVERY_DETECTED',
+                'INTERVENTION_SHOWN',
+                'COOLDOWN_STARTED',
+                'APP_SWITCHED'
+            )),
+            app_name TEXT,
+            window_title TEXT,
+            url TEXT,
+            metadata TEXT,
+            timestamp TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime'))
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_episodic_timestamp ON episodic_events(timestamp)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_episodic_type ON episodic_events(event_type)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_episodic_type_time ON episodic_events(event_type, timestamp)")
+
     # 迁移信任分到专注货币（仅首次）
     _migrate_trust_score_to_currency(conn)
 
@@ -962,4 +992,175 @@ def get_all_latest_insights(
             insights[insight_type] = insight
 
     return insights
+
+
+# ============ Memory 系统：Episodic Memory 相关函数 ============
+
+def record_episodic_event(
+    conn: sqlite3.Connection,
+    event_type: str,
+    app_name: Optional[str] = None,
+    window_title: Optional[str] = None,
+    url: Optional[str] = None,
+    metadata: Optional[dict] = None,
+) -> int:
+    """
+    记录情景记忆事件（Episodic Memory）。
+
+    Args:
+        conn: 数据库连接
+        event_type: 事件类型
+        app_name: 应用名称
+        window_title: 窗口标题
+        url: URL（如果有）
+        metadata: 额外元数据（JSON 格式）
+
+    Returns:
+        int: 新记录 ID
+    """
+    import json
+
+    cursor = conn.execute(
+        """
+        INSERT INTO episodic_events (event_type, app_name, window_title, url, metadata)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            event_type,
+            app_name,
+            window_title[:500] if window_title else None,  # 限制长度
+            url[:500] if url else None,
+            json.dumps(metadata, ensure_ascii=False) if metadata else None,
+        ),
+    )
+    conn.commit()
+
+    logger.debug(f"Episodic event recorded: {event_type} - {app_name} - {window_title}")
+    return cursor.lastrowid
+
+
+def get_recent_episodic_events(
+    conn: sqlite3.Connection,
+    seconds: int = 120,
+    event_types: Optional[list[str]] = None,
+    limit: int = 20,
+) -> list[dict]:
+    """
+    获取最近的情景记忆事件。
+
+    Args:
+        conn: 数据库连接
+        seconds: 时间范围（秒）
+        event_types: 事件类型过滤（None = 全部）
+        limit: 返回记录数量
+
+    Returns:
+        list[dict]: 事件列表
+    """
+    import json
+
+    query = """
+        SELECT * FROM episodic_events
+        WHERE timestamp >= strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime', '-{} seconds')
+    """.format(seconds)
+
+    params = []
+    if event_types:
+        placeholders = ",".join(["?" for _ in event_types])
+        query += f" AND event_type IN ({placeholders})"
+        params.extend(event_types)
+
+    query += " ORDER BY timestamp DESC LIMIT ?"
+    params.append(limit)
+
+    cursor = conn.execute(query, params)
+    events = []
+
+    for row in cursor.fetchall():
+        event = dict(row)
+        # 解析 metadata JSON
+        if event.get("metadata"):
+            try:
+                event["metadata"] = json.loads(event["metadata"])
+            except json.JSONDecodeError:
+                event["metadata"] = {}
+        events.append(event)
+
+    return events
+
+
+def get_last_close_event(
+    conn: sqlite3.Connection,
+    app_name: Optional[str] = None,
+    keyword: Optional[str] = None,
+    within_seconds: int = 300,
+) -> Optional[dict]:
+    """
+    获取最后的关闭事件（用于 Recovery 检测）。
+
+    Args:
+        conn: 数据库连接
+        app_name: 应用名称过滤
+        keyword: 关键词过滤（匹配 window_title 或 metadata）
+        within_seconds: 时间范围（秒）
+
+    Returns:
+        Optional[dict]: 最后的关闭事件，如果没有则返回 None
+    """
+    import json
+
+    query = """
+        SELECT * FROM episodic_events
+        WHERE event_type IN ('USER_CLOSED_TAB', 'USER_CLOSED_WINDOW', 'USER_MINIMIZED')
+        AND timestamp >= strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime', '-{} seconds')
+    """.format(within_seconds)
+
+    params = []
+
+    if app_name:
+        query += " AND app_name = ?"
+        params.append(app_name)
+
+    query += " ORDER BY timestamp DESC LIMIT 1"
+
+    cursor = conn.execute(query, params)
+    row = cursor.fetchone()
+
+    if row:
+        event = dict(row)
+        if event.get("metadata"):
+            try:
+                event["metadata"] = json.loads(event["metadata"])
+            except json.JSONDecodeError:
+                event["metadata"] = {}
+        return event
+
+    return None
+
+
+def cleanup_old_episodic_events(
+    conn: sqlite3.Connection,
+    hours: int = 24,
+) -> int:
+    """
+    清理旧的情景记忆事件。
+
+    Args:
+        conn: 数据库连接
+        hours: 保留时间（小时）
+
+    Returns:
+        int: 删除的行数
+    """
+    cursor = conn.execute(
+        """
+        DELETE FROM episodic_events
+        WHERE timestamp < strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime', '-{} hours')
+        """.format(hours)
+    )
+    conn.commit()
+    deleted_count = cursor.rowcount
+    if deleted_count > 0:
+        logger.info(f"Cleaned up {deleted_count} old episodic events")
+    return deleted_count
 

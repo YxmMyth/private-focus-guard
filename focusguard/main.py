@@ -34,6 +34,8 @@ from focusguard.storage.database import (
     get_active_session,
     update_trust_score,
     log_activity,
+    record_episodic_event,
+    get_recent_episodic_events,
     DEFAULT_DB_PATH,
 )
 from focusguard.storage.cleaner import DataMetabolismCleaner
@@ -45,6 +47,7 @@ from focusguard.services.economy_service import EconomyService
 from focusguard.services.audit_service import AuditService
 from focusguard.services.data_transformer import DataTransformer
 from focusguard.services.enforcement_service import EnforcementService
+from focusguard.services.recovery_detector import RecoveryDetector
 from focusguard.ui.dialogs.intervention_dialog import InterventionDialog
 from focusguard.ui.main_window import MainWindow
 
@@ -100,6 +103,16 @@ class SupervisionEngine(QThread):
         self._running = False
         self._check_interval = config.supervision_check_interval  # 默认 30 秒
 
+        # v3.0: Memory 系统 - Recovery 检测器
+        self._recovery_detector = RecoveryDetector(
+            grace_period_seconds=getattr(config, 'recovery_grace_period', 30),
+            detection_window_seconds=120,
+            confidence_threshold=0.7,
+        )
+
+        # v3.0: 冷却状态机
+        self._cooldown_until = 0.0  # 冷却结束时间戳
+
         # 连接 Signal
         self._dialog.action_chosen.connect(self._on_user_choice)
         self._action_manager.snooze_expired.connect(self._on_snooze_expired)
@@ -128,6 +141,12 @@ class SupervisionEngine(QThread):
 
         while self._running:
             logger.debug("SupervisionEngine check cycle started")
+
+            # v3.0: 检查是否在冷却期
+            if self._is_in_cooldown():
+                logger.debug("In cooldown period, skipping supervision check")
+                self._wait_next_check()
+                continue
 
             # 检查是否在 SNOOZE 状态
             if self._action_manager.is_snoozed():
@@ -183,10 +202,56 @@ class SupervisionEngine(QThread):
                 else:
                     self._check_interval = config.supervision_check_interval
 
+                # v3.0: Memory 系统 - Recovery 状态检查（早期退出）
+                # 在 LLM 调用之前检查用户是否已回归工作
+                if instant_log:
+                    latest_app = instant_log[0].get("app_name", "")
+                    latest_window = instant_log[0].get("window_title", "")
+                    latest_url = instant_log[0].get("url", "")
+
+                    # 使用 RecoveryDetector 检测用户是否回归工作
+                    with ensure_initialized(self._db_path) as conn:
+                        is_recovery, recovery_reason, recovery_confidence = self._recovery_detector.detect_recovery(
+                            conn=conn,
+                            current_app=latest_app,
+                            current_title=latest_window,
+                            current_url=latest_url,
+                        )
+
+                    if is_recovery and recovery_confidence >= 0.7:
+                        logger.info(f"Recovery state detected: {recovery_reason} (confidence: {recovery_confidence:.2f})")
+                        # 记录 Recovery 事件
+                        with ensure_initialized(self._db_path) as conn:
+                            record_episodic_event(
+                                conn=conn,
+                                event_type="RECOVERY_DETECTED",
+                                app_name=latest_app,
+                                window_title=latest_window,
+                                url=latest_url,
+                                metadata={"reason": recovery_reason, "confidence": recovery_confidence},
+                            )
+                        # 强制关闭所有干预对话框
+                        self._dialog.force_close()
+                        # 进入冷却期（3 分钟）
+                        cooldown_seconds = getattr(config, 'recovery_cooldown', 180)
+                        self._enter_cooldown(cooldown_seconds)
+                        logger.info(f"Entered cooldown for {cooldown_seconds} seconds after recovery")
+                        # 跳过本次检查的剩余部分
+                        self._wait_next_check()
+                        continue
+
                 # 步骤 3: 调用 LLM 进行判断（同步调用）
                 # 获取当前余额和用户上下文传递给 LLM
                 balance = self._economy_service.get_balance()
                 user_context = self._data_transformer.get_user_context()
+
+                # v3.0: Memory 系统 - 获取最近的 episodic 事件
+                with ensure_initialized(self._db_path) as conn:
+                    episodic_events = get_recent_episodic_events(
+                        conn,
+                        seconds=120,  # 最近 2 分钟
+                        limit=10,
+                    )
 
                 response = self._llm_service.analyze_activity(
                     instant_log=instant_log,
@@ -198,6 +263,7 @@ class SupervisionEngine(QThread):
                     user_streak=None,  # TODO: 从数据库读取用户连续性数据
                     user_context=user_context,
                     session_blocks=session_blocks,  # v3.0: 注入 session_blocks 上下文
+                    episodic_events=episodic_events,  # v3.0: 注入 episodic 事件（Memory 系统）
                 )
 
                 if response is None:
@@ -243,6 +309,33 @@ class SupervisionEngine(QThread):
             sleep_time = min(1.0, float(remaining))
             time_module.sleep(sleep_time)  # 使用Python的time.sleep而不是QThread.sleep
             remaining -= sleep_time
+
+    def _enter_cooldown(self, seconds: int) -> None:
+        """
+        进入冷却期（用户关闭分心后，不再干预一段时间）。
+
+        Args:
+            seconds: 冷却时间（秒）
+        """
+        self._cooldown_until = time_module.time() + seconds
+        logger.info(f"Entered cooldown for {seconds} seconds (until {time_module.ctime(self._cooldown_until)})")
+
+    def _is_in_cooldown(self) -> bool:
+        """
+        检查是否在冷却期。
+
+        Returns:
+            bool: 是否在冷却期
+        """
+        if self._cooldown_until <= 0:
+            return False
+
+        if time_module.time() < self._cooldown_until:
+            return True
+
+        # 冷却已过期，重置
+        self._cooldown_until = 0.0
+        return False
 
     def _show_intervention_dialog(self, response: dict) -> None:
         """
@@ -362,6 +455,7 @@ class FocusGuardApp(QApplication):
         self._enforcement_service = EnforcementService()
 
         self._action_manager = ActionManager(enforcement_service=self._enforcement_service)
+        self._action_manager.set_db_path(config.db_path)  # v3.0: 设置数据库路径用于记录 episodic 事件
 
         # 初始化专注货币服务
         self._economy_service = EconomyService(

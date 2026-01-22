@@ -214,6 +214,9 @@ SYSTEM_PROMPT = """你是 FocusGuard v3.0 智能监督 Agent。你的职责是�
 【最近 20 分钟趋势】
 {context_trend}
 
+## 最近用户行为事件（Memory 系统）
+{episodic_events_summary}
+
 ## 用户最近状态（Session Blocks - L2 数据）
 {session_blocks_summary}
 
@@ -613,6 +616,47 @@ class LLMService:
 
         return summary
 
+    def _format_episodic_events(self, episodic_events: Optional[list[dict]]) -> str:
+        """
+        格式化 episodic 事件（Memory 系统）。
+
+        Args:
+            episodic_events: 事件列表
+
+        Returns:
+            str: 格式化的事件摘要
+        """
+        if not episodic_events:
+            return "（无最近事件）"
+
+        lines = []
+        for event in episodic_events[:10]:  # 最多显示 10 个事件
+            event_type = event.get("event_type", "")
+            timestamp = event.get("timestamp", "")
+            window_title = event.get("window_title", "") or ""
+            app_name = event.get("app_name", "") or ""
+
+            # 简化事件类型显示
+            type_labels = {
+                "USER_CLOSED_TAB": "关闭标签页",
+                "USER_CLOSED_WINDOW": "关闭窗口",
+                "USER_MINIMIZED": "最小化窗口",
+                "USER_SNOOZED": "暂停监控",
+                "USER_DISMISSED": "误报驳回",
+                "RECOVERY_DETECTED": "回归工作",
+                "INTERVENTION_SHOWN": "显示干预",
+            }
+            type_label = type_labels.get(event_type, event_type)
+
+            # 格式：[时间] 类型 - 应用 - 标题
+            if window_title:
+                line = f"- [{timestamp[-8:]}] {type_label} - {app_name}: {window_title[:40]}"
+            else:
+                line = f"- [{timestamp[-8:]}] {type_label} - {app_name}"
+            lines.append(line)
+
+        return "\n".join(lines) if lines else "（无最近事件）"
+
     def _build_prompt(
         self,
         instant_log: list[dict],
@@ -624,9 +668,10 @@ class LLMService:
         user_streak: Optional[dict] = None,
         user_context: Optional[dict] = None,
         session_blocks: Optional[list[dict]] = None,
+        episodic_events: Optional[list[dict]] = None,
     ) -> str:
         """
-        构建完整的 Prompt（v3.0: 添加 session_blocks 上下文注入）。
+        构建完整的 Prompt（v3.0: 添加 session_blocks + episodic_events 上下文注入）。
 
         Args:
             instant_log: 最近 30 秒活动
@@ -638,6 +683,7 @@ class LLMService:
             user_streak: 用户连续性数据 {"consecutive_distractions": int, "consecutive_focus": int}
             user_context: 用户洞察数据（来自 DataTransformer）
             session_blocks: 最近2小时的 session_blocks 数据（L2 压缩数据）
+            episodic_events: 最近的用户行为事件（Memory 系统）
 
         Returns:
             str: 完整的 Prompt
@@ -705,6 +751,9 @@ class LLMService:
         # 格式化 session_blocks（v3.0: L2 数据上下文注入）
         session_blocks_summary = self._format_session_blocks(session_blocks)
 
+        # v3.0: 格式化 episodic 事件（Memory 系统）
+        episodic_events_summary = self._format_episodic_events(episodic_events)
+
         return SYSTEM_PROMPT.format(
             goal=goal or "未设置目标",
             balance=balance,
@@ -715,6 +764,7 @@ class LLMService:
             instant_log=format_log(instant_log),
             short_trend=format_log(short_trend),
             context_trend=format_log(context_trend),
+            episodic_events_summary=episodic_events_summary,
             session_blocks_summary=session_blocks_summary,
         )
 
@@ -932,11 +982,12 @@ class LLMService:
         user_streak: Optional[dict] = None,
         user_context: Optional[dict] = None,
         session_blocks: Optional[list[dict]] = None,
+        episodic_events: Optional[list[dict]] = None,
         max_retries: int = 3,
         base_delay: float = 1.0,
     ) -> Optional[LLMResponse]:
         """
-        分析用户活动（带重试机制）（v3.0: 添加 session_blocks 上下文）。
+        分析用户活动（带重试机制）（v3.0: 添加 session_blocks + episodic_events 上下文）。
 
         Args:
             instant_log: 最近 30 秒活动
@@ -948,6 +999,7 @@ class LLMService:
             user_streak: 用户连续性数据
             user_context: 用户洞察数据（来自 DataTransformer）
             session_blocks: 最近2小时的 session_blocks 数据（L2 压缩数据）
+            episodic_events: 最近的用户行为事件（Memory 系统）
             max_retries: 最大重试次数
             base_delay: 基础延迟（秒），用于指数退避
 
@@ -957,7 +1009,7 @@ class LLMService:
         prompt = self._build_prompt(
             instant_log, short_trend, context_trend, trust_score, goal,
             balance=balance, user_streak=user_streak, user_context=user_context,
-            session_blocks=session_blocks,
+            session_blocks=session_blocks, episodic_events=episodic_events,
         )
 
         for attempt in range(max_retries):

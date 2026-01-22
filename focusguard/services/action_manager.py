@@ -51,7 +51,55 @@ class ActionManager(QObject):
         # 新增：刚关闭的关键词列表，防止误报
         self._recently_closed_keywords: dict[str, float] = {}  # {keyword: timestamp}
 
+        # v3.0: Memory 系统 - 数据库路径（用于记录 episodic 事件）
+        self._db_path = None  # 将在运行时设置
+
         logger.info("ActionManager initialized")
+
+    def set_db_path(self, db_path: str) -> None:
+        """
+        设置数据库路径（用于记录 episodic 事件）。
+
+        Args:
+            db_path: 数据库文件路径
+        """
+        self._db_path = db_path
+
+    def _record_episodic_event(
+        self,
+        event_type: str,
+        app_name: str | None = None,
+        window_title: str | None = None,
+        url: str | None = None,
+        metadata: dict | None = None,
+    ) -> None:
+        """
+        记录情景记忆事件（Episodic Memory）。
+
+        Args:
+            event_type: 事件类型
+            app_name: 应用名称
+            window_title: 窗口标题
+            url: URL
+            metadata: 额外元数据
+        """
+        if not self._db_path:
+            return
+
+        try:
+            from ..storage.database import ensure_initialized, record_episodic_event
+
+            with ensure_initialized(self._db_path) as conn:
+                record_episodic_event(
+                    conn=conn,
+                    event_type=event_type,
+                    app_name=app_name,
+                    window_title=window_title,
+                    url=url,
+                    metadata=metadata,
+                )
+        except Exception as e:
+            logger.warning(f"Failed to record episodic event: {e}")
 
     def handle_action(
         self,
@@ -140,6 +188,14 @@ class ActionManager(QObject):
         duration_minutes = payload.get("duration_minutes") or payload.get("duration", 5)
         if isinstance(duration_minutes, str):
             duration_minutes = int(duration_minutes)
+
+        # v3.0: Memory 系统 - 记录 episodic 事件
+        self._record_episodic_event(
+            event_type="USER_SNOOZED",
+            app_name=payload.get("current_app", ""),
+            window_title=payload.get("current_window_title", ""),
+            metadata={"duration_minutes": duration_minutes},
+        )
 
         # 如果有 EnforcementService，最小化当前窗口
         if self._enforcement:
@@ -235,6 +291,14 @@ class ActionManager(QObject):
         Args:
             payload: {"dismiss_action": str, "app": str, "window_title": str}
         """
+        # v3.0: Memory 系统 - 记录 episodic 事件
+        self._record_episodic_event(
+            event_type="USER_DISMISSED",
+            app_name=payload.get("app", ""),
+            window_title=payload.get("window_title", ""),
+            metadata=payload,
+        )
+
         action = payload.get("dismiss_action", "none")  # none, close, minimize
         target_app = payload.get("app", "")
         target_title = payload.get("window_title", "")
@@ -275,6 +339,14 @@ class ActionManager(QObject):
         Args:
             payload: {"app": str, "current_window_title": str} 或 {"keyword": str, "current_app": str}
         """
+        # v3.0: Memory 系统 - 记录 episodic 事件
+        self._record_episodic_event(
+            event_type="USER_CLOSED_WINDOW",
+            app_name=payload.get("app", "") or payload.get("current_app", ""),
+            window_title=payload.get("current_window_title", ""),
+            metadata={"keyword": payload.get("keyword", "")},
+        )
+
         if not self._enforcement:
             logger.warning("EnforcementService not available, cannot close window")
             return
@@ -312,6 +384,14 @@ class ActionManager(QObject):
         Args:
             payload: {"app": str, "current_window_title": str, "duration_minutes": int} 或 {"keyword": str, "current_app": str}
         """
+        # v3.0: Memory 系统 - 记录 episodic 事件
+        self._record_episodic_event(
+            event_type="USER_MINIMIZED",
+            app_name=payload.get("app", "") or payload.get("current_app", ""),
+            window_title=payload.get("current_window_title", ""),
+            metadata={"keyword": payload.get("keyword", ""), "duration_minutes": payload.get("duration_minutes", 10)},
+        )
+
         if not self._enforcement:
             logger.warning("EnforcementService not available, cannot minimize window")
             return
@@ -477,10 +557,27 @@ class ActionManager(QObject):
         if success:
             logger.info(f"Action: CLOSE_TAB - Closed tab with keyword '{keyword}'")
 
+            # v3.0: Memory 系统 - 记录 episodic 事件
+            self._record_episodic_event(
+                event_type="USER_CLOSED_TAB",
+                window_title=keyword,
+                metadata={"keyword": keyword, "return_to_app": return_to_app},
+            )
+
             # 关键修复：添加到忽略列表，防止5分钟内重复检测
             import time
             self._recently_closed_keywords[keyword.lower()] = time.time()
             logger.info(f"Added '{keyword}' to ignore list for 5 minutes to prevent false positives")
+
+            # v3.0: 新增 - 将 URL 模式添加到 ChromeMonitor 的关闭列表
+            # 这样可以防止 Chrome History 中的旧 URL 触发误报
+            try:
+                from ..monitors.chrome_monitor import ChromeMonitor
+                # 添加 URL 模式到忽略列表（5分钟冷却）
+                ChromeMonitor.add_closed_url(keyword, cooldown_seconds=300)
+                logger.info(f"Added '{keyword}' to ChromeMonitor closed URL list")
+            except ImportError:
+                logger.warning("ChromeMonitor not available, cannot add URL to closed list")
 
             # 新增：从数据库中删除最近的活动记录，防止LLM误判
             try:

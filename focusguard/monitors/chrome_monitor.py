@@ -148,11 +148,16 @@ class ChromeMonitor(BaseMonitor):
     - 仅在窗口标题包含浏览器关键词时触发
     - 复制数据库到临时文件读取（避免锁冲突）
     - 发出 activity_detected Signal（附带 URL）
+    - 过滤最近关闭的 URL（防止误报已关闭的标签页）
 
     注意：
     - 不使用轮询，而是通过 QTimer 按需触发
     - 由外部（如 WindowsMonitor）调用 check_history()
     """
+
+    # 类变量：跨实例共享最近关闭的 URL 列表
+    _recently_closed_urls: dict[str, float] = {}  # {url_pattern: timestamp}
+    _closed_urls_lock = None  # 将在 __init__ 中初始化为 threading.Lock
 
     def __init__(self, parent: Optional[QThread] = None) -> None:
         """
@@ -165,6 +170,11 @@ class ChromeMonitor(BaseMonitor):
 
         self._history_path: Optional[str] = None
         self._last_url: Optional[str] = None
+
+        # 初始化线程锁（如果尚未初始化）
+        if ChromeMonitor._closed_urls_lock is None:
+            import threading
+            ChromeMonitor._closed_urls_lock = threading.Lock()
 
         # 尝试自动检测 History 路径
         self._history_path = get_chrome_history_path()
@@ -195,6 +205,51 @@ class ChromeMonitor(BaseMonitor):
         self.exec()
 
         logger.info("ChromeMonitor thread stopped gracefully")
+
+    @classmethod
+    def add_closed_url(cls, url_pattern: str, cooldown_seconds: int = 300) -> None:
+        """
+        添加一个最近关闭的 URL 模式到忽略列表。
+
+        Args:
+            url_pattern: URL 模式（可以是域名、路径关键词等）
+            cooldown_seconds: 冷却时间（秒），默认 5 分钟
+        """
+        import time
+        with cls._closed_urls_lock:
+            cls._recently_closed_urls[url_pattern.lower()] = time.time() + cooldown_seconds
+            logger.info(f"Added URL pattern '{url_pattern}' to closed list for {cooldown_seconds}s")
+
+    def _is_url_recently_closed(self, url: str) -> bool:
+        """
+        检查 URL 是否匹配最近关闭的 URL 模式。
+
+        Args:
+            url: 要检查的 URL
+
+        Returns:
+            bool: 如果 URL 匹配最近关闭的模式则返回 True
+        """
+        import time
+        current_time = time.time()
+
+        with ChromeMonitor._closed_urls_lock:
+            # 清理过期的 URL 模式
+            expired_patterns = [
+                pattern for pattern, expiry_time in ChromeMonitor._recently_closed_urls.items()
+                if current_time >= expiry_time
+            ]
+            for pattern in expired_patterns:
+                del ChromeMonitor._recently_closed_urls[pattern]
+
+            # 检查当前 URL 是否匹配任何已关闭的模式
+            url_lower = url.lower()
+            for pattern, expiry_time in ChromeMonitor._recently_closed_urls.items():
+                if current_time < expiry_time and pattern in url_lower:
+                    logger.debug(f"URL '{url[:50]}...' matches closed pattern '{pattern}', ignoring")
+                    return True
+
+        return False
 
     def check_history(self, app_name: str, window_title: str) -> None:
         """
@@ -234,6 +289,11 @@ class ChromeMonitor(BaseMonitor):
                 return
 
             current_url = history["url"]
+
+            # v3.0: 检查 URL 是否在最近关闭的列表中
+            if self._is_url_recently_closed(current_url):
+                logger.debug(f"Ignoring recently closed URL: {current_url[:50]}...")
+                return
 
             # 新增：URL 验证优先于窗口标题验证
             # 只有真正访问 bilibili.com 才触发检测

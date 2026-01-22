@@ -1,6 +1,7 @@
 """
 Direct test for ZhipuAI API
 """
+import os
 import requests
 import json
 import sys
@@ -12,13 +13,15 @@ if sys.platform == 'win32':
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 # API config
-api_key = "1a9b343b6bb947bf939814b919a3c9fb.Nv1tf3ds7jltzywn"
+api_key = os.getenv("ZHIPUAI_API_KEY")
 base_url = "https://open.bigmodel.cn/api/paas/v4"
 model = "glm-4-flash"
 
 print("=" * 60)
 print("Testing ZhipuAI API")
 print("=" * 60)
+if not api_key:
+    raise SystemExit("Missing ZHIPUAI_API_KEY environment variable")
 
 # Test 1: Standard OpenAI format
 print("\n[Test 1] Standard OpenAI format")

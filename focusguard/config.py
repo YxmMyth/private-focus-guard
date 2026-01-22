@@ -64,6 +64,7 @@ class Config:
 
         # LLM API 配置
         self.llm_api_key: str = os.getenv("FOCUSGUARD_LLM_API_KEY", "")
+        user_provided_llm_key = bool(self.llm_api_key)
         self.llm_base_url: str = os.getenv(
             "FOCUSGUARD_LLM_BASE_URL",
             "https://api.openai.com/v1"
@@ -155,11 +156,33 @@ class Config:
             "false"
         ).lower() == "true"
 
+        # v3.0: Memory 系统配置（Recovery 检测）
+        self.recovery_grace_period: int = int(os.getenv(
+            "FOCUSGUARD_RECOVERY_GRACE_PERIOD",
+            "30"  # 宽限期（秒），关闭后多久才开始检测 Recovery
+        ))
+        self.recovery_cooldown: int = int(os.getenv(
+            "FOCUSGUARD_RECOVERY_COOLDOWN",
+            "180"  # 冷却时间（秒），Recovery 后不干预的时间
+        ))
+        self.episodic_retention_hours: int = int(os.getenv(
+            "FOCUSGUARD_EPISODIC_RETENTION_HOURS",
+            "24"  # episodic 事件保留时间（小时）
+        ))
+
         # === 强制保护：API密钥始终使用内置值 ===
         # 防止用户通过user_settings.json或环境变量覆盖API密钥
-        if bundled_env_path and bundled_env_path.exists():
+        if not self.llm_api_key and bundled_env_path and bundled_env_path.exists():
             self.llm_api_key = self._get_bundled_api_key()
-            logger.info("API key secured from bundled config (user override prevented)")
+            logger.info("API key loaded from bundled config (fallback)")
+
+        # Log which key source is active (masked, no secrets).
+        if user_provided_llm_key:
+            logger.info("API key source: user environment/.env")
+        elif self.llm_api_key:
+            logger.info("API key source: bundled_config.env")
+        else:
+            logger.warning("API key source: missing")
 
         self._initialized = True
         logger.info("Configuration loaded")

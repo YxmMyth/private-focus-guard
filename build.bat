@@ -1,6 +1,6 @@
 @echo off
 echo ====================================
-echo FocusGuard v3.0 - Production Build
+echo FocusGuard v3.2 - Production Build
 echo ====================================
 echo.
 
@@ -68,7 +68,7 @@ copy /y "%OUTPUT_DIR%\FocusGuard.dist\FocusGuard.exe" "%DIST_DIR%\"
 echo.
 echo [6/6] Creating README...
 (
-echo FocusGuard v3.0 - Production Build
+echo FocusGuard v3.2 - Production Build
 echo.
 echo 使用说明：
 echo 1. 双击 FocusGuard.exe 启动程序

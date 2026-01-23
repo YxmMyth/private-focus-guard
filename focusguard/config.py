@@ -195,7 +195,11 @@ class Config:
             Optional[Path]: 配置文件路径，如果不存在则返回None
         """
         if getattr(sys, 'frozen', False):
-            # 打包后：在exe所在目录查找bundled_config.env
+            # 打包后：.env 在 sys._MEIPASS 根目录（PyInstaller 解压位置）
+            meipass_env = Path(sys._MEIPASS) / ".env"
+            if meipass_env.exists():
+                return meipass_env
+            # 回退：在 exe 所在目录查找
             return Path(sys.executable).parent / "bundled_config.env"
         else:
             # 开发环境：优先查找 focusguard 目录下的 .env

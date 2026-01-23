@@ -13,8 +13,12 @@ from typing import Optional
 
 # 添加项目根目录到 sys.path
 if getattr(sys, 'frozen', False):
-    # 打包后：资源在 sys.executable 的目录
-    project_root = Path(sys.executable).parent
+    # 打包后：focusguard 包在 sys._MEIPASS 内部
+    project_root = Path(sys._MEIPASS)
+    # 同时添加 focusguard 内部路径，支持 "from storage.xxx" 导入
+    focusguard_path = project_root / 'focusguard'
+    if str(focusguard_path) not in sys.path:
+        sys.path.insert(0, str(focusguard_path))
 else:
     # 开发环境：项目根目录是 focusguard 的父目录
     project_root = Path(__file__).parent.parent

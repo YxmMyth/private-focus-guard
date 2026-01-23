@@ -2,10 +2,6 @@
 
 ## ✅ 监控功能 + 图形界面 + 浏览器URL追踪
 
-### 🆕 最新功能：浏览器URL监控
-
-不仅可以监控应用程序，**还能监控访问的具体网站！**
-
 **支持浏览器：**
 - ✅ Google Chrome
 - ✅ Microsoft Edge
@@ -13,8 +9,8 @@
 **监控信息：**
 - 应用程序名称
 - 窗口标题
-- **访问的URL**（新功能！）
-- **网页标题**（新功能！）
+- **访问的URL**
+- **网页标题**
 - 访问时间
 
 ---
@@ -32,7 +28,7 @@ python ui/main_window.py
 
 **功能包括：**
 - ✅ 实时活动窗口显示
-- ✅ 浏览器URL追踪（新！）
+- ✅ 浏览器URL追踪
 - ✅ 一键启动/停止监控
 - ✅ 活动历史表格（包含URL列）
 - ✅ 统计信息展示
@@ -138,35 +134,7 @@ python quick_test.py  # 实时监控
 python test_now.py    # 测试当前窗口
 ```
 
----
 
-## 📝 下一步计划
-
-- [x] PyQt6 图形界面 ✅
-- [ ] AI专注力判断
-- [ ] 规则引擎
-- [ ] 对话管理
-- [ ] 打包成exe
-
----
-
-## 🔑 配置AI密钥（可选）
-
-如果要使用AI判断功能，需要设置腾讯云密钥：
-
-```bash
-# Windows CMD
-set TENCENT_SECRET_ID=你的SecretId
-set TENCENT_SECRET_KEY=你的SecretKey
-
-# Windows PowerShell
-$env:TENCENT_SECRET_ID="你的SecretId"
-$env:TENCENT_SECRET_KEY="你的SecretKey"
-```
-
-获取密钥: https://console.cloud.tencent.com/cam/capi
-
----
 
 ## 隐私政策
 
